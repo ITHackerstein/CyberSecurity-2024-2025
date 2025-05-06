@@ -21,7 +21,7 @@ export function middleware(request: NextRequest) {
   console.log('x-middleware-subrequest value:', exploitValue)
 
   // Check if the request is for the protected route
-  if (request.nextUrl.pathname.startsWith('/protected')) {
+  if (request.nextUrl.pathname.startsWith('/dashboard')) {
     // Check if user is authenticated
     if (!isAuthenticated) {
       console.log('Auth failed - redirecting to /')
@@ -35,5 +35,5 @@ export function middleware(request: NextRequest) {
 
 // Configure middleware to run on specific paths
 export const config = {
-  matcher: ['/protected/:path*'],
-} 
+  matcher: ['/dashboard/:path*'],
+}

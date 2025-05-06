@@ -1,9 +1,12 @@
+import 'bootstrap/dist/css/bootstrap.min.css'
+import 'bootstrap-icons/font/bootstrap-icons.min.css'
 import type { Metadata } from 'next'
 import './globals.css'
+import BootstrapClient from '@/components/BootstrapClient.js'
 
 export const metadata: Metadata = {
-  title: 'Vulnerable Next.js App - CVE-2025-29927 Demo',
-  description: 'Demonstration of Next.js middleware vulnerability CVE-2025-29927',
+  title: 'CyberSecurity 2024/2025 - CVE-2025-29927 in Next.JS',
+  description: 'A demo showing off the exploit of the CVE-2025-29927 vulnerability in Next.js',
 }
 
 export default function RootLayout({
@@ -12,21 +15,37 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" data-bs-theme="dark">
       <body>
-        <main style={{ maxWidth: '1000px', margin: '0 auto', padding: '20px' }}>
-          <header style={{ marginBottom: '20px' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 'bold' }}>CVE-2025-29927 Demo</h1>
-            <nav style={{ marginTop: '10px' }}>
-              <ul style={{ display: 'flex', gap: '16px' }}>
-                <li><a href="/" style={{ color: 'blue', textDecoration: 'underline' }}>Home</a></li>
-                <li><a href="/protected" style={{ color: 'blue', textDecoration: 'underline' }}>Protected Page</a></li>
-              </ul>
+        <main>
+          <header>
+            <nav className="navbar navbar-expand-lg bg-body-tertiary">
+              <div className="container-fluid">
+                <a className="navbar-brand" href="#">CVE-2025-29927</a>
+                <button className="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+                  <span className="navbar-toggler-icon"></span>
+                </button>
+                <div className="collapse navbar-collapse" id="navbarSupportedContent">
+                  <ul className="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li className="nav-item">
+                      <a className="nav-link active" aria-current="page" href="/">Home</a>
+                    </li>
+                    <li className="nav-item">
+                      <a className="nav-link" href="/dashboard">Dashboard</a>
+                    </li>
+                  </ul>
+                  <a className="nav-link" type="button" href="/login">
+                    <i className="bi bi-person-circle me-2"></i>
+                    Login
+                  </a>
+                </div>
+              </div>
             </nav>
           </header>
           {children}
+          <BootstrapClient />
         </main>
       </body>
     </html>
   )
-} 
+}

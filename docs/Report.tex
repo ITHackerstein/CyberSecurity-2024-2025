@@ -1,0 +1,139 @@
+%! TeX program = lualatex
+
+% TODO: Inserisci timeline della vulnerabilità
+
+\documentclass[a4paper,oneside,12pt]{report}
+\usepackage[utf8]{inputenc}
+\usepackage[italian]{babel}
+\usepackage{hyperref}
+\usepackage{parskip}
+
+\linespread{1.25}
+
+\title{\textbf{CyberSecurity 2024-25} \\ CVE-2025-29927 in \texttt{Next.js}}
+\author{Davide Carella \& Luca Ardito}
+\date{}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\addcontentsline{toc}{chapter}{Introduzione}
+\chapter*{Introduzione}
+\label{chap:introduzione}
+
+Nel contesto dello sviluppo web moderno, la sicurezza delle applicazioni rappresenta una sfida critica e sempre più complessa. I framework frontend e full-stack, come \texttt{Next.js}, forniscono funzionalità avanzate per lo sviluppo rapido di applicazioni web dinamiche, ma allo stesso tempo introducono superfici di attacco potenziali che, se trascurate, possono compromettere l'intera applicazione e i dati degli utenti.
+
+\texttt{Next.js} è un framework open source basato su \texttt{React}, progettato per la realizzazione di applicazioni web ad alte prestazioni. Offre funzionalità come il rendering lato server (SSR), la generazione statica (SSG), il supporto per l'internazionalizzazione, la gestione delle API e il caricamento dinamico dei componenti. È particolarmente apprezzato per la sua semplicità d’uso, la scalabilità e le ottimizzazioni integrate per SEO e performance.
+
+Questo elaborato si concentra sull’analisi di una vulnerabilità recentemente identificata in esso: la \emph{CVE-2025-29927}. Tale vulnerabilità ha avuto un impatto significativo, rendendo possibile, in specifiche condizioni, l’accesso non autorizzato a risorse protette, con gravi implicazioni per la riservatezza e l'integrità dei dati.
+
+L’obiettivo del progetto è duplice: da un lato descrivere dettagliatamente la vulnerabilità, la sua origine e il suo meccanismo di sfruttamento, dall’altro offrire una panoramica delle tecniche di mitigazione adottate dal team di sviluppo di \texttt{Next.js} per correggerla. In particolare, verranno presentati:
+\begin{itemize}
+  \item una spiegazione tecnica su cosa compromette la vulnerabilità;
+  \item l’analisi dell’entry point dell’attacco;
+  \item il calcolo del punteggio \emph{CVSS} (Common Vulnerability Scoring System);
+  \item un approfondimento sull’origine e sulla causa radice della falla;
+  \item due \textit{Proof of Concept} per dimostrarne lo sfruttamento pratico;
+  \item le contromisure adottate e possibili \textit{workaround} temporanei.
+\end{itemize}
+
+\chapter{Analisi della CVE}
+\label{chap:analisi-cve}
+
+\section{Descrizione ufficiale della CVE}
+\label{sec:descrizione-ufficiale-cve}
+
+Dal \href{https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2025-29927}{NIST NVD}:
+\begin{quote}
+``Next.js is a React framework for building full-stack web applications. Starting in version 1.11.4 and prior to versions 12.3.5, 13.5.9, 14.2.25, and 15.2.3, it is possible to bypass authorization checks within a Next.js application, if the authorization check occurs in middleware. If patching to a safe version is infeasible, it is recommend that you prevent external user requests which contain the x-middleware-subrequest header from reaching your Next.js application. This vulnerability is fixed in 12.3.5, 13.5.9, 14.2.25, and 15.2.3.''
+\end{quote}
+
+\section{Cosa compromette?}
+\label{sec:cosa-compromette}
+
+La vulnerabilità \emph{CVE-2025-29927} ha un impatto diretto su uno dei tre principi fondamentali della sicurezza informatica, comunemente noti come \emph{triade CIA}: \emph{Confidenzialità}, \emph{Integrità} e \emph{Disponibilità}.
+
+\begin{itemize}
+  \item \emph{Confidenzialità}: è il principio maggiormente compromesso da questa vulnerabilità. In presenza di configurazioni specifiche, un attaccante remoto non autenticato può accedere a risorse che dovrebbero essere protette da meccanismi di autenticazione o autorizzazione. Questo può includere pagine private, endpoint API interni o contenuti generati dinamicamente. La conseguenza è la potenziale esposizione di informazioni sensibili, con implicazioni gravi in termini di privacy e sicurezza.
+  \item \emph{Integrità}: anche se in modo meno diretto, l’integrità può essere compromessa. Un attaccante che riesce a visualizzare informazioni riservate potrebbe sfruttarle per manipolare il comportamento dell'applicazione in una fase successiva. Ad esempio, accedendo a configurazioni interne o risposte API non destinate all’utente, potrebbe costruire richieste mirate in grado di alterare dati, forzare comportamenti non previsti o eludere meccanismi di controllo lato client. Sebbene la vulnerabilità non consenta di modificare direttamente i dati, può essere un punto di partenza per attacchi più avanzati che impattano l'integrità.
+  \item \emph{Disponibilità}: non sono stati rilevati impatti sulla disponibilità dei servizi. La vulnerabilità non introduce vettori di attacco per causare interruzioni o rallentamenti del servizio (DoS), né limita l’accesso alle funzionalità legittime dell’applicazione.
+\end{itemize}
+
+In sintesi, la \emph{CVE-2025-29927} compromette principalmente la \emph{confidenzialità} dei dati e, in misura minore e solo in condizioni particolari, anche l’\emph{integrità}. La \emph{disponibilità}, invece, non viene generalmente alterata dall’exploit di questa vulnerabilità.
+
+\section{Dove parte l'attacco?}
+\label{sec:dove-parte-attacco}
+
+L'attacco associato alla \emph{CVE-2025-29927} ha origine a livello del \emph{routing} di \texttt{Next.js}, in particolare nella gestione delle richieste da parte del \emph{middleware} applicativo. In alcune configurazioni, il middleware non applica correttamente le restrizioni di accesso previste per determinate route dinamiche o protette. Questo comportamento anomalo consente a un attaccante remoto non autenticato di accedere a contenuti o API destinati a utenti autenticati, semplicemente formulando una richiesta HTTP ben costruita verso l’endpoint vulnerabile.
+
+Il punto d’ingresso principale è quindi una richiesta HTTP inviata verso un percorso protetto che, però, non viene intercettata correttamente dal sistema di protezione. In particolare, la vulnerabilità si manifesta quando l’header \texttt{x-middleware-subrequest} non viene gestito correttamente, oppure viene interpretato in modo non sicuro, causando una bypass del middleware che normalmente dovrebbe bloccare l’accesso non autorizzato.
+
+L’attaccante non ha bisogno di interagire con l’interfaccia utente dell’applicazione: è sufficiente che conosca o intuisca gli endpoint sensibili (ad esempio, \texttt{/dashboard}, \texttt{/admin}, ecc.) e che invii una richiesta manipolata direttamente dal browser, da uno script o tramite uno strumento come \textit{curl} o \textit{Burp Suite}.
+
+La facilità con cui si può identificare e sfruttare il punto d’ingresso rende la vulnerabilità particolarmente pericolosa, soprattutto in ambienti dove le route riservate sono prevedibili o mal configurate.
+
+\section{Come viene calcolato il CVSS?}
+\label{sec:come-viene-calcolato-cvss}
+
+La versione utilizzata al momento della pubblicazione della \emph{CVE-2025-29927} è la \emph{CVSS v3.1}, che calcola un punteggio finale compreso tra 0.0 (nessun impatto) e 10.0 (massima gravità), suddiviso in tre gruppi di metriche.
+
+Uno score per la vulnerabilit\`a \`e stato gi\`a calcolato con i seguenti parametri:
+\begin{itemize}
+  \item \emph{Metriche Base}:
+	\begin{itemize}
+		\item \texttt{AV:N} -- l'attacco è eseguibile da remoto via rete;
+		\item \texttt{AC:L} -- l’exploit non richiede condizioni particolari;
+		\item \texttt{PR:N}: -- l’attaccante non deve essere autenticato;
+		\item \texttt{UI:N} -- l’attacco non richiede interazione da parte dell’utente;
+		\item \texttt{S:U} -- l’impatto resta confinato nel contesto dell’applicazione vulnerabile;
+		\item \texttt{C:H}: -- possibile accesso a dati sensibili;
+		\item \texttt{I:N}: possibile modifica di dati sensibili;
+		\item \texttt{A:N}: -- non si verificano impatti sulla disponibilit\`a.
+	\end{itemize}
+  \item \emph{Metriche Temporali e Ambientali}: non disponibili.
+\end{itemize}
+
+Sulla base di queste metriche, la \emph{CVE-2025-29927} riceve un punteggio base \emph{CVSS 3.1} di 9.1.
+
+\chapter{Analisi della causa radice}
+\label{chap:analisi-causa-radice}
+
+% TODO: Leggi https://zhero-web-sec.github.io/research-and-things/nextjs-and-the-corrupt-middleware
+
+\section{Origine della vulnerabilit\`a}
+\label{sec:origine-vulnerabilita}
+
+\chapter{Exploitation}
+\label{chap:exploitation}
+
+\section{Fasi dell'attacco}
+\label{sec:fasi-attacco}
+
+\section{\textit{Proof of Concept} (PoC) in Python}
+\label{sec:poc-python}
+
+\section{\textit{Proof of Concept} (PoC) in Burp Suite}
+\label{sec:poc-burp-suite}
+
+\chapter{Fixes e Mitigazione}
+\label{chap:fixes-mitigazione}
+
+\section{Aggiornamento del framework}
+\label{sec:aggiornamento-framework}
+
+\section{\textit{Workaround} momentaneo}
+\label{sec:workaround-momentaneo}
+
+\addcontentsline{toc}{chapter}{Conclusioni}
+\chapter*{Conclusioni}
+\label{chap:conclusioni}
+
+\addcontentsline{toc}{chapter}{Riferimenti}
+\chapter*{Riferimenti}
+\label{chap:references}
+
+\end{document}
+

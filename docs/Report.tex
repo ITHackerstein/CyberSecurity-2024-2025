@@ -166,7 +166,7 @@ Com'\`e possibile notare nelle linee 686-687 si estrae il contenuto dell'header 
 
 Sucessivamente, nelle linee 707-713, si controlla se questa lista contiene il valore della variabile \texttt{middlewareInfo.name}. Se questo \`e vero, il middleware viene completamente ignorato e la richiesta viene inoltrata alla destinazione senza alcun controllo.
 
-Il valore di \texttt{middlwareInfo.name} si pu\`o facilmente indovinare in quanto \`e l'unico percorso in cui il middleware si trova ed \`e quindi composto dal nome della directory dove si trova il middleware e il nome del file. Nella versione 12 di \texttt{Next.js} l'unica route possibile era quella di \texttt{pages} e quindi il middleware si deve trovare li dentro. Per cui l'unico valore possibile per quella versione era:
+Il valore di \texttt{middlwareInfo.name} si pu\`o facilmente indovinare in quanto \`e l'unico percorso in cui il middleware si trova ed \`e quindi composto dal nome della directory dove si trova il middleware e il nome del file. Nella versione 12 di \texttt{Next.js} l'unica route possibile era quella di \texttt{pages} e quindi il middleware si deve trovare l\`i dentro. Per cui l'unico valore possibile per quella versione era:
 \begin{center}
 	\scriptsize
 	\texttt{x-middleware-subrequest: pages/\_middleware}

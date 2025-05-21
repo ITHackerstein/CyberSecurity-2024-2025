@@ -70,11 +70,11 @@ La vulnerabilità \emph{CVE-2025-29927} ha un impatto diretto su uno dei tre pri
 
 \begin{itemize}
   \item \emph{Confidenzialità}: è il principio maggiormente compromesso da questa vulnerabilità. In presenza di configurazioni specifiche, un attaccante remoto non autenticato può accedere a risorse che dovrebbero essere protette da meccanismi di autenticazione o autorizzazione. Questo può includere pagine private, endpoint API interni o contenuti generati dinamicamente. La conseguenza è la potenziale esposizione di informazioni sensibili, con implicazioni gravi in termini di privacy e sicurezza.
-  \item \emph{Integrità}: anche se in modo meno diretto, l’integrità può essere compromessa. Un attaccante che riesce a visualizzare informazioni riservate potrebbe sfruttarle per manipolare il comportamento dell'applicazione in una fase successiva. Ad esempio, accedendo a configurazioni interne o risposte API non destinate all’utente, potrebbe costruire richieste mirate in grado di alterare dati, forzare comportamenti non previsti o eludere meccanismi di controllo lato client. Sebbene la vulnerabilità non consenta di modificare direttamente i dati, può essere un punto di partenza per attacchi più avanzati che impattano l'integrità.
+  \item \emph{Integrità}: anche se in modo meno diretto, l’integrità può essere compromessa. Un attaccante non autenticato potrebbe avere accesso ad una o pi\`u pagine protette che consentono d'inserire o modificare dati gi\`a esistenti compromettendo cos\`i l'integrit\`a.
   \item \emph{Disponibilità}: non sono stati rilevati impatti sulla disponibilità dei servizi. La vulnerabilità non introduce vettori di attacco per causare interruzioni o rallentamenti del servizio (DoS), né limita l’accesso alle funzionalità legittime dell’applicazione.
 \end{itemize}
 
-In sintesi, la \emph{CVE-2025-29927} compromette principalmente la \emph{confidenzialità} dei dati e, in misura minore e solo in condizioni particolari, anche l’\emph{integrità}. La \emph{disponibilità}, invece, non viene generalmente alterata dall’exploit di questa vulnerabilità.
+In sintesi, la \emph{CVE-2025-29927} compromette principalmente la \emph{confidenzialità} dei dati e l’\emph{integrità}. La \emph{disponibilità}, invece, non viene generalmente alterata dall’exploit di questa vulnerabilità.
 
 \section{Dove parte l'attacco?}
 \label{sec:dove-parte-attacco}
@@ -125,7 +125,7 @@ Sulla base di queste metriche, la \emph{CVE-2025-29927} riceve un punteggio base
 \end{itemize}
 Ad esempio, \`e possibile proteggere una route con un middleware che verifica se l'utente \`e autenticato e autorizzato ad accedere a quella risorsa. Tuttavia, in alcune configurazioni, il middleware non applica correttamente le restrizioni di accesso previste per determinate route dinamiche o protette.
 
-Il codice vulnerabilie si trova all'interno del file \texttt{packages/next/server/next-server.ts} in particolare nella funzione \texttt{runMiddleware}:
+Il codice vulnerabilie si trova all'interno del file \raggedright\texttt{packages/next/server/next-server.ts} in particolare nella funzione \texttt{runMiddleware}:
 \begin{figure}[H]
 	\centering
 \begin{minted}[breaklines,frame=lines,linenos,firstnumber=686,fontsize=\scriptsize]{javascript}
@@ -360,15 +360,11 @@ RequestHeader unset x-middleware-subrequest
 \label{chap:conclusioni}
 \justifying
 
-In questo documento è stata analizzata in dettaglio la vulnerabilità CVE-2025-29927 che ha interessato \texttt{Next.js}, uno dei framework più diffusi per lo sviluppo di applicazioni web moderne. Attraverso l’analisi, la ricostruzione dell’origine del problema e la dimostrazione dell’exploit, è emerso chiaramente come anche i framework più maturi e mantenuti possano contenere errori di progettazione o implementazione con gravi ripercussioni sulla sicurezza.
+In questo documento abbiamo analizzato dettagliatamente la CVE-2025-29927 che ha colpito \texttt{Next.js}, uno dei framework pi\`u utilizzati per lo sviluppo di applicazioni Web. Con l'analisi della vulnerabilit\`a e, in particolare, della sua causa e del suo exploit si \`e visto come anche i framework pi\`u mantenuti e utilizzati possano contenere errori di progettazione o implementazioni, anche gravi, che si ripercuotono gravemente sulla sicurezza.
 
-La vulnerabilità esaminata compromette in modo diretto la \emph{confidenzialità} dei dati e può, in alcuni casi, avere impatti indiretti sull’\emph{integrità} dell’applicazione. È stata identificata una falla nella logica di accesso alle risorse che, in presenza di parametri specifici, permette a un attaccante remoto non autenticato di accedere a contenuti protetti.
+Si \`e visto, anche attraverso il calcolo del suo punteggio, la gravit\`a della vulnerabilit\`a che compromette confidenzialit\`a e integrit\`a dell'applicazione. Inoltre, con due PoC, si \`e visto quanto sia semplice sfruttare questa vulnerabilit\`a in un contesto reale.
 
-È stato inoltre approfondito il punteggio assegnato alla vulnerabilit\`a e il suo calcolo, utile per quantificare la gravità della vulnerabilità.
-
-La scrittura di due PoC, uno in Python e uno in \textit{Burp Suite}, ha dimostrato l’effettiva possibilità di sfruttare la vulnerabilit\`a in un contesto reale.
-
-In conclusione, l’analisi della CVE-2025-29927 rappresenta un chiaro esempio di come la sicurezza non sia un processo dinamico e imprescindibile del ciclo di vita del software. Comprendere a fondo le cause e le conseguenze di una vulnerabilità non solo aiuta a proteggere i propri sistemi, ma contribuisce a diffondere una cultura della \emph{sicurezza proattiva}, essenziale nel panorama tecnologico odierno.
+Per concludere, l'analisi della CVE-2025-29927 evidenzia la dinamicit\`a della sicurezza nel ciclo di vita del software. L'analisi della vulnerabilit\`a permette di proteggere i propri sistemi ma contribuisce anche a diffondere una cultura della \textit{sicurezza proattiva}, molto rilevante nel mondo tecnologico attuale.
 
 \addcontentsline{toc}{chapter}{Riferimenti}
 \chapter*{Riferimenti}
